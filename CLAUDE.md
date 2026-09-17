@@ -1,0 +1,163 @@
+# PageLens
+
+In-page semantic search Chrome extension. Query in the popup -> ranked, highlighted passages on
+the current page, scored by TypeSafe AI's Jev model via a Vercel Edge Function proxy.
+
+Full user-facing setup steps live in `README.md`. This file is architecture rationale and the
+external API reference for future sessions.
+
+## Repo layout
+
+pnpm workspace, two packages:
+
+- `extension/` — MV3 Chrome extension (TypeScript, Vite). No bundler magic beyond plain Vite.
+- `proxy/` — Vercel Edge Function (TypeScript, `ai` SDK). Deployed independently of the extension.
+
+They share no code and no workspace dependency on each other — see "Duplicated constants" below
+for why.
+
+## Flow
+
+```
+popup --SEARCH{query}--> background --executeScript+EXTRACT--> content script
+                             |                                      |
+                             |<--------------- chunks --------------|
+                             |
+                             |--POST {query, chunks}--> proxy --evaluate()--> Jev (via AI Gateway)
+                             |<--------------- scores ------------------------|
+                             |
+                             |--RESULTS{top 8}--> popup (renders list)
+                             |--HIGHLIGHT{top 8}--> content script (highlights #1, auto-scrolls)
+
+popup --JUMP{ref}--> background --JUMP--> content script (scrolls to that ref)
+```
+
+Message contracts are in `extension/src/types.ts` (`BackgroundRequest`/`Response`,
+`ContentRequest`/`Response`).
+
+## Key decisions and why
+
+**No static `content_scripts` manifest entry.** The spec called for minimal permissions
+(`activeTab`, `scripting`, `host_permissions` only for the proxy's own origin — no broad host
+access). A statically declared `content_scripts` block would need matching `host_permissions` for
+every site it runs on. Instead, `background/index.ts` injects `content.js` on demand via
+`chrome.scripting.executeScript`, riding on the `activeTab` grant from the user opening the popup
+(which counts as "invoking the extension"). This re-injects on every search rather than once per
+page load — simpler than trying to detect "already injected," and `content/index.ts` guards
+against double-registering its own message listener with `window.__pageLensLoaded`.
+
+**DOM anchors via `data-pagelens-id`, not computed CSS selectors.** Every accepted block gets a
+`data-pagelens-id="pl-N"` attribute when extracted. Scrolling later is just
+`querySelector('[data-pagelens-id="pl-N"]')`. Far simpler and more robust than building/matching
+CSS-path selectors, at the cost of a harmless DOM mutation on the page (cleared and reassigned on
+every search — see `extractVisibleBlocks` in `extension/src/content/extract.ts`).
+
+**Background is the orchestrator, per the original spec**, not the popup. Popup only sends
+`SEARCH`/`JUMP` and renders whatever comes back. This also means a search survives the popup
+closing mid-flight (MV3 popups are ephemeral; the service worker isn't, within its lifetime).
+
+**Two separate Vite configs for background/content (`vite.config.ts` +
+`vite.mv3.config.ts`).** The popup is a normal Vite HTML entry. Background and content each need
+to ship as one dependency-free IIFE file — Chrome loads them directly, not through a module
+graph. They can't be built in a single Rollup invocation with two inputs: both import from
+`../config` and `../types`, and Rollup refuses to split a shared chunk across multiple IIFE
+outputs. `vite.mv3.config.ts` is invoked twice (`TARGET=background` / `TARGET=content`) using
+Vite's single-entry `build.lib` mode instead.
+
+**Chunking uses LangChain's `RecursiveCharacterTextSplitter`** (`@langchain/textsplitters`,
+explicit user request), not hand-rolled splitting logic. It only runs on DOM blocks longer than
+`CHUNK_SIZE` (400 chars) — most paragraphs/list items pass through as a single chunk with their
+own `data-pagelens-id` anchor already attached; splitting a block produces multiple chunks that
+all point back to the same anchor (scrolling to any of them lands in the right place). Total
+chunk count is capped at 40 by evenly sampling across the page (`downsampleEvenly`), not
+truncating the tail, so long articles still get full-page coverage.
+
+**Rate limiting was skipped for v1** (explicit user decision — the alternative, a real
+distributed limiter, needs Vercel KV/Upstash or similar, an external service the rest of the
+stack doesn't otherwise need; an in-memory Edge Function limiter is best-effort at best since
+it's not shared across regions or cold starts). If this proxy is ever deployed somewhere it'll get
+real traffic, add one before relying on it being "protected."
+
+**Top-1 highlighted + auto-scroll only** (explicit user decision over highlighting all N ranks).
+Ranks 2-8 appear only in the popup list, click-to-jump. See `highlightTopResult` in
+`extension/src/content/highlight.ts`.
+
+**Duplicated constants/types between `extension/` and `proxy/`** (`MAX_CHUNKS`,
+`estimateRequestTokens`, the `Chunk`/`score` shapes) rather than a shared workspace package. The
+two packages build for completely different runtimes (browser content script vs. Vercel Edge
+Function) and deploy independently; a third `shared` package would need its own build step for
+both consumers for a handful of small interfaces/constants. If these ever drift out of sync,
+that's the tradeoff — check both `extension/src/config.ts` and `proxy/lib/jev.ts` when changing
+budget/limit numbers.
+
+**Token budget is a heuristic, not exact.** `estimateRequestTokens` uses a ~4-chars-per-token
+approximation plus a flat per-question overhead — there's no tokenizer dependency on either side.
+The content script's own cap (40 chunks × 400 chars) keeps requests comfortably under budget in
+practice; the token estimate is a defense-in-depth check (in `content/index.ts` before ever
+messaging the background worker, and again in the proxy before calling `evaluate()`) for
+pathological pages, not the primary control.
+
+## TypeScript is pinned to 6.0.3, not the latest 7.x
+
+`typescript` 7.x (the Go-ported "tsgo" compiler) is the current npm `latest` tag, and `tsc
+--noEmit` works fine with it. But `typescript-eslint@8.70.0`'s peer range is `>=4.8.4 <6.1.0` —
+it depends on TS's internal compiler APIs, which changed in the 7.x rewrite, and linting fails
+outright on 7.x (`typescript-eslint does not support TS 7.0`, verified in this repo). All three
+`package.json`s pin `typescript` to `^6.0.3` for that reason. Bump it only once
+typescript-eslint supports 7.x (tracked at
+https://github.com/typescript-eslint/typescript-eslint/issues/10940) — check `npm view
+typescript-eslint peerDependencies` before doing so.
+
+## External API reference: Jev / AI SDK `experimental_evaluate()`
+
+Jev launched 2026-09-15 (TypeSafe AI, "System One model" — returns typed decisions, not text) and
+AI SDK 7 added `experimental_evaluate()` to call it. **This postdates most models' training data
+— don't guess at this API from general AI SDK knowledge, it's genuinely new.** If anything below
+looks stale, re-check https://ai-sdk.dev/docs/reference/ai-sdk-core/evaluate and
+https://vercel.com/docs/ai-gateway/modalities/evaluation before changing the proxy.
+
+```ts
+import { experimental_evaluate as evaluate } from 'ai'; // package: "ai", v7+
+
+const result = await evaluate({
+  model: 'typesafe-ai/jev', // string form routes through AI Gateway
+  state: /* string | object | array */ { query, chunks },
+  questions: {
+    // Record<string, Question>; each key becomes a key in result.answers
+    someId: {
+      type: 'score', // or "choice" | "boolean"
+      instructions: 'How relevant is this passage to the search query?',
+      criteria: ['not relevant', 'somewhat relevant', 'relevant', 'highly relevant'], // low -> high
+    },
+  },
+});
+
+result.answers.someId; // { type: 'score', score: 2.86, probabilities: { '0':0, '1':0.02, ... } }
+result.usage; // { inputTokens, outputTokens, totalTokens }
+```
+
+Question types:
+
+- `score` — `criteria: string[]`, >=2 labels, low to high. Answer: `{ score: number, probabilities }`.
+- `choice` — `criteria: Record<optionName, description>`. Answer: `{ choice: string, probabilities }`.
+- `boolean` — `criteria?: { true: string; false: string }`. Answer: `{ probability: number }`.
+
+Multiple questions can share one `state` and are answered in a single round trip — this project
+uses exactly one `evaluate()` call per search, with one `score` question per chunk (see
+`proxy/api/search.ts`).
+
+**Auth**: set `AI_GATEWAY_API_KEY` in the environment (Vercel project env vars for the deployed
+function, `.env.local` for local `vercel dev`). The plain string model form picks this up
+automatically — no explicit provider wiring needed. (OIDC via `vercel env pull` also works but
+expires after 12h locally; the API key is simpler for both local dev and prod, so that's what
+this project uses.)
+
+**Runtime**: works in Vercel's Edge Runtime — it's a `fetch()` call under the hood, no Node-only
+APIs required. `proxy/tsconfig.json` uses `"lib": ["ES2022", "WebWorker"]` (not `"DOM"`) to match
+what Edge Functions actually have (`Request`/`Response`/`fetch`/`crypto`, no `document`/`window`).
+`proxy/lib/env.d.ts` hand-declares just `process.env` typing rather than pulling in `@types/node`
+for a Worker-like environment.
+
+**HTTP API** (non-AI-SDK clients): `POST https://ai-gateway.vercel.sh/v1/evaluate` with the same
+`{ model, state, questions }` body, `Authorization: Bearer $AI_GATEWAY_API_KEY`. Not used here,
+but documented in case the proxy ever needs to drop the `ai` package dependency.
