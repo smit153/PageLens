@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PageLens</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>PageLens</h1>
+      <form id="search-form">
+        <input
+          id="query"
+          type="text"
+          placeholder="Search this page…"
+          autocomplete="off"
+          autofocus
+        />
+        <button type="submit">Search</button>
+      </form>
+      <p id="status" role="status"></p>
+      <ol id="results"></ol>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
