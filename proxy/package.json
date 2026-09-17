@@ -3,8 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
-    "build": "tsc --noEmit",
+    "dev": "node --watch --env-file=.env.local dev-server.ts",
     "typecheck": "tsc --noEmit",
     "deploy": "vercel deploy --prod"
   },

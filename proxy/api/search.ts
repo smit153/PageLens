@@ -1,6 +1,11 @@
 import { experimental_evaluate as evaluate } from 'ai';
-import type { Chunk, SearchRequestBody, SearchResponseBody } from '../lib/types';
-import { MAX_CHUNKS, MAX_STATE_TOKENS, RELEVANCE_RUBRIC, estimateRequestTokens } from '../lib/jev';
+import type { Chunk, SearchRequestBody, SearchResponseBody } from '../lib/types.ts';
+import {
+  MAX_CHUNKS,
+  MAX_STATE_TOKENS,
+  RELEVANCE_RUBRIC,
+  estimateRequestTokens,
+} from '../lib/jev.ts';
 
 export const config = { runtime: 'edge' };
 
