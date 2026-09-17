@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "PageLens",
+  "version": "0.1.0",
+  "description": "In-page semantic search powered by TypeSafe AI's Jev model.",
+  "action": {
+    "default_popup": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://your-proxy.vercel.app/*"]
+}
