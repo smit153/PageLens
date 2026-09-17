@@ -75,8 +75,11 @@ export default async function handler(request: Request): Promise<Response> {
     chunks.map((chunk) => [
       chunk.id,
       {
+        // The id must appear here: all questions share one state containing
+        // every chunk, so without it Jev can't tell which passage a given
+        // question is asking about and returns near-identical scores for all.
         type: 'score' as const,
-        instructions: `How relevant is this passage to the search query: "${query}"?`,
+        instructions: `How relevant is the passage with id "${chunk.id}" to the search query: "${query}"?`,
         criteria: RELEVANCE_RUBRIC,
       },
     ]),
