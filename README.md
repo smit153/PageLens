@@ -49,12 +49,17 @@ cp .env.local.example .env.local
 # edit .env.local and set AI_GATEWAY_API_KEY
 ```
 
-Get a key from your Vercel team's **AI Gateway → API Keys** page (requires a Vercel account and
-a team with AI Gateway credits). For local development:
+Get a key from your Vercel team's **AI Gateway → API Keys** page (requires a Vercel account, and
+a card on file — AI Gateway returns a 403 `customer_verification_required` until you add one,
+even to spend the free credits). For local development:
 
 ```bash
-pnpm dev:proxy   # runs `vercel dev` from the repo root
+pnpm dev:proxy   # http://localhost:3000/api/search
 ```
+
+That runs `proxy/dev-server.ts` — the same `api/search.ts` handler on Node's built-in HTTP
+server. It needs no Vercel account, project linking, or `vercel dev`. See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for why we don't use `vercel dev` locally.
 
 To deploy:
 
@@ -96,6 +101,9 @@ extension (and the page you're testing on) after each rebuild.
 ## Scope / known limitations (v1)
 
 - Single active tab only — no cross-tab or cross-page search.
+- Results scoring below `MIN_RESULT_SCORE` (1.5 on Jev's 0–3 rubric) are dropped, so a page with
+  no answer shows "Nothing on this page matched closely enough" rather than 8 confidently-ranked
+  irrelevant passages. Tune the floor in `extension/src/config.ts`.
 - No caching or persistence between page loads; every search re-extracts and re-scores.
 - No auth — the proxy is open. **Rate limiting was intentionally left out of v1** (see
   `CLAUDE.md` for why); if you deploy this publicly, add one before relying on it.

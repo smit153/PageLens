@@ -97,6 +97,25 @@ practice; the token estimate is a defense-in-depth check (in `content/index.ts` 
 messaging the background worker, and again in the proxy before calling `evaluate()`) for
 pathological pages, not the primary control.
 
+## Local proxy dev uses `dev-server.ts`, not `vercel dev`
+
+`proxy/dev-server.ts` runs `api/search.ts` on Node's built-in HTTP server (native TS support +
+`--env-file`), with zero dependencies and no Vercel account. `vercel dev` was tried first and
+fails three separate ways in this monorepo — recursion guard, static-output-dir check, and the
+repo-level link pointing at the git root instead of `proxy/`. All three are documented with their
+error codes in `docs/DEPLOYMENT.md`; read that before re-attempting `vercel dev`.
+
+Consequences to keep in mind when editing `proxy/`:
+
+- **No `build` script in `proxy/package.json`.** Adding one makes Vercel treat the project as a
+  static site and fail on a missing `public/` directory. The root `build` script uses
+  `pnpm -r --if-present run build` so the proxy is simply skipped.
+- **`api/` and `lib/` imports use explicit `.ts` extensions** (with `allowImportingTsExtensions`
+  in `proxy/tsconfig.json`), because Node's ESM resolver requires them. Verified to still bundle
+  cleanly under esbuild, which is what Vercel's function builder uses.
+- **`dev-server.ts` sits outside `tsconfig.json`'s `include`** (which covers only `api` and
+  `lib`), so it isn't type-checked and Node's globals don't leak into the Edge-targeted code.
+
 ## TypeScript is pinned to 6.0.3, not the latest 7.x
 
 `typescript` 7.x (the Go-ported "tsgo" compiler) is the current npm `latest` tag, and `tsc
