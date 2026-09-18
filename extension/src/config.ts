@@ -1,7 +1,7 @@
-// EDIT AFTER DEPLOYING THE PROXY: point this at your deployed Edge Function,
-// and update host_permissions in public/manifest.json to match the same
-// origin (see README.md "Deploying the proxy").
-export const PROXY_SEARCH_URL = 'https://your-proxy.vercel.app/api/search';
+// LOCAL DEV: `pnpm dev:proxy` serves this on port 3000. Switch this (and
+// host_permissions in public/manifest.json) to your deployed proxy's URL
+// before shipping (see README.md "Deploying the proxy").
+export const PROXY_SEARCH_URL = 'http://localhost:3000/api/search';
 
 /** Hard cap on chunks sent per search; matches the proxy's own cap. */
 export const MAX_CHUNKS = 40;
