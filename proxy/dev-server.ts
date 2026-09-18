@@ -38,8 +38,12 @@ function logScores(payload) {
 
   const scores = parsed.scores.map((s) => s.score).sort((a, b) => b - a);
   const above = scores.filter((s) => s >= 1.5).length;
+  const spans = parsed.scores.filter((s) => s.span).length;
+  const cov = parsed.coverage
+    ? `${parsed.coverage.scored}/${parsed.coverage.total} scored`
+    : `${scores.length} chunks`;
   console.log(
-    `  ${scores.length} chunks | ${above} >= 1.5 | top: ${scores
+    `  ${cov} | ${above} >= 1.5 | ${spans} span(s) | top: ${scores
       .slice(0, 5)
       .map((s) => s.toFixed(2))
       .join(', ')}`,
