@@ -8,11 +8,32 @@ function ensureStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
+  // The descendant rules matter as much as the block rule: a highlighted
+  // passage usually contains links and other coloured inline text, and a page's
+  // own palette (Wikipedia's blue links, say) is unreadable against our
+  // background. Forcing every descendant to transparent/white keeps the whole
+  // passage legible no matter what the host page styles it. #423a6a against
+  // white is ~10:1 contrast, so it stays accessible on light and dark pages.
   style.textContent = `
     .${HIGHLIGHT_TOP_CLASS} {
-      background-color: #ffd76a !important;
-      outline: 2px solid #e08b00 !important;
-      border-radius: 2px;
+      background-color: #423a6a !important;
+      outline: 2px solid #b3a6ec !important;
+      outline-offset: 2px;
+      border-radius: 3px;
+      box-shadow: 0 0 0 6px rgba(66, 58, 106, 0.28) !important;
+      scroll-margin: 96px;
+    }
+    .${HIGHLIGHT_TOP_CLASS},
+    .${HIGHLIGHT_TOP_CLASS} * {
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+    }
+    .${HIGHLIGHT_TOP_CLASS} * {
+      background-color: transparent !important;
+    }
+    .${HIGHLIGHT_TOP_CLASS} a {
+      text-decoration: underline !important;
+      text-underline-offset: 2px;
     }
   `;
   document.head.appendChild(style);
