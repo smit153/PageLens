@@ -1,4 +1,4 @@
-import { PROXY_SEARCH_URL, TOP_N_RESULTS } from '../config';
+import { MIN_RESULT_SCORE, PROXY_SEARCH_URL, TOP_N_RESULTS } from '../config';
 import type {
   BackgroundRequest,
   BackgroundResponse,
@@ -67,6 +67,7 @@ async function scoreChunks(query: string, chunks: Chunk[]): Promise<RankedResult
       text: chunk.text,
       score: scoreById.get(chunk.id) ?? 0,
     }))
+    .filter((result) => result.score >= MIN_RESULT_SCORE)
     .sort((a, b) => b.score - a.score)
     .slice(0, TOP_N_RESULTS);
 }
