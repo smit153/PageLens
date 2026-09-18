@@ -1,6 +1,33 @@
 const CONTENT_SELECTOR = 'h1, h2, h3, h4, h5, h6, p, li, blockquote';
-const SKIP_ANCESTOR_SELECTOR = 'nav, footer, script, style, noscript';
+
+// Beyond the obvious non-content landmarks, this skips citation and navigation
+// containers. On reference-heavy pages (Wikipedia especially) they supply the
+// overwhelming majority of <li> elements -- footnotes, bibliographies and
+// navbox link soup -- which crowd real prose out of the chunk budget and score
+// ~0 against any query.
+const SKIP_ANCESTOR_SELECTOR = [
+  'nav',
+  'footer',
+  'script',
+  'style',
+  'noscript',
+  'aside',
+  'form',
+  '[role="navigation"]',
+  '[role="contentinfo"]',
+  '.reflist',
+  '.references',
+  '.navbox',
+  '.infobox',
+  '.mw-references-wrap',
+  '.mw-editsection',
+].join(', ');
+
 export const DATA_ATTR = 'data-pagelens-id';
+
+/** Prose carries far more searchable meaning than list items, so it wins the
+ *  chunk budget when a page has more content than we can send. */
+const PROSE_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE']);
 
 function isVisible(el: Element): boolean {
   if (el.closest(SKIP_ANCESTOR_SELECTOR)) return false;
@@ -22,6 +49,8 @@ function isVisible(el: Element): boolean {
 export interface RawBlock {
   ref: string;
   text: string;
+  /** True for paragraphs/headings/quotes, false for list items. */
+  isProse: boolean;
 }
 
 /**
@@ -48,7 +77,7 @@ export function extractVisibleBlocks(): RawBlock[] {
     const ref = `pl-${nextId++}`;
     el.setAttribute(DATA_ATTR, ref);
     accepted.push(el);
-    blocks.push({ ref, text });
+    blocks.push({ ref, text, isProse: PROSE_TAGS.has(el.tagName) });
   }
 
   return blocks;
