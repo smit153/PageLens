@@ -6,21 +6,51 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main>
-      <h1>PageLens</h1>
-      <form id="search-form">
-        <input
-          id="query"
-          type="text"
-          placeholder="Search this page…"
-          autocomplete="off"
-          autofocus
-        />
-        <button type="submit">Search</button>
+    <header class="app-bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="4" />
+            <circle cx="11" cy="11" r="3.5" />
+            <path d="m14 14 3.5 3.5" stroke-linecap="round" />
+          </svg>
+        </span>
+        <h1>PageLens</h1>
+      </div>
+      <kbd id="shortcut-badge"></kbd>
+    </header>
+
+    <section class="search-area">
+      <form id="search-form" autocomplete="off">
+        <div class="input-wrap">
+          <svg
+            class="input-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" stroke-linecap="round" />
+          </svg>
+          <input id="query" type="text" placeholder="Search this page…" autofocus />
+          <span class="enter-hint" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 10 5 14l4 4" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M5 14h10a4 4 0 0 0 4-4V6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+        </div>
       </form>
-      <p id="status" role="status"></p>
+      <p class="page-context">on <span id="page-url">the current page</span></p>
+    </section>
+
+    <section class="results-area">
+      <div id="state" class="state" role="status"></div>
       <ol id="results"></ol>
-    </main>
+    </section>
+
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

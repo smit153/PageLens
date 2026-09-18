@@ -1,5 +1,16 @@
 :root {
-  color-scheme: light;
+  --accent: #423a6a;
+  --accent-soft: #8f82c9;
+  --accent-bright: #b3a6ec;
+  --bg: #15161d;
+  --surface: #1e1f29;
+  --surface-raised: #262733;
+  --border: #2d2e3b;
+  --text: #c5c8d4;
+  --text-bright: #eceef5;
+  --text-dim: #71748a;
+
+  color-scheme: dark;
   font-family:
     system-ui,
     -apple-system,
@@ -7,86 +18,265 @@
     sans-serif;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
-  width: 340px;
+  width: 400px;
+  height: 560px;
   margin: 0;
-  padding: 12px;
-}
-
-h1 {
-  font-size: 15px;
-  margin: 0 0 8px;
-}
-
-#search-form {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---------- header ---------- */
+
+.app-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--accent);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: #fff;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.brand-mark svg {
+  width: 16px;
+  height: 16px;
+}
+
+kbd {
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  font-family: inherit;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* ---------- search ---------- */
+
+.search-area {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 11px;
+  width: 15px;
+  height: 15px;
+  color: var(--text-dim);
+  pointer-events: none;
 }
 
 #query {
+  width: 100%;
+  padding: 9px 42px 9px 34px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+  font-size: 13px;
+  color: var(--text-bright);
+}
+
+#query::placeholder {
+  color: var(--text-dim);
+}
+
+#query:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+
+/* Press-Enter affordance. Purely a hint -- the form submits on Enter. */
+.enter-hint {
+  position: absolute;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.enter-hint svg {
+  width: 13px;
+  height: 13px;
+}
+
+#query:focus ~ .enter-hint {
+  border-color: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.page-context {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#page-url {
+  color: var(--accent-soft);
+}
+
+/* ---------- results ---------- */
+
+.results-area {
   flex: 1;
-  padding: 6px 8px;
-  font-size: 13px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
 }
 
-button {
-  padding: 6px 10px;
-  font-size: 13px;
-  border: 1px solid #999;
-  border-radius: 4px;
-  background: #f5f5f5;
-  cursor: pointer;
+.results-area::-webkit-scrollbar {
+  width: 10px;
 }
 
-button:hover {
-  background: #ececec;
-}
-
-#status {
-  margin: 8px 0 4px;
-  font-size: 12px;
-  color: #555;
-  min-height: 14px;
+.results-area::-webkit-scrollbar-thumb {
+  border: 3px solid var(--bg);
+  border-radius: 6px;
+  background: #3b3d4d;
 }
 
 #results {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.result {
   display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 6px 0;
-  border-bottom: 1px solid #eee;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.result-rank {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  color: #888;
-  width: 16px;
+.result-card {
+  padding: 12px 13px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
 }
 
-.result-snippet {
-  flex: 1;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: #222;
+.match-score {
+  margin-bottom: 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  color: var(--accent-bright);
+}
+
+.snippet {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.snippet strong {
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
+.jump-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--text-bright);
   cursor: pointer;
 }
 
-.result-snippet:hover {
-  text-decoration: underline;
+.jump-btn:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent);
+}
+
+/* ---------- states ---------- */
+
+.state {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  height: 100%;
+  padding: 0 24px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.state.is-visible {
+  display: flex;
+}
+
+.state.is-error {
+  color: #e3849a;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-bright);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
 }
