@@ -21,7 +21,8 @@ _Ask a question, get the passage that answers it — ranked, scored, and marked 
 
 <!-- Deliberately a bare URL on its own line: that is the only form GitHub renders
      as an inline video player. Wrapping it in a markdown link turns it back into a
-     link, and a <video> tag is stripped by GitHub's sanitiser. -->
+     link, and a <video> tag is stripped by GitHub's sanitiser. The source file is
+     assets/demo.mp4; the URL above is GitHub's own copy, which is what plays. -->
 
 https://github.com/user-attachments/assets/31c56d2d-fbb5-43ed-8219-b11f82088cc0
 
