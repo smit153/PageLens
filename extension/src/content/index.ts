@@ -1,8 +1,8 @@
-import { estimateRequestTokens, MAX_STATE_TOKENS } from '../config';
+import { MAX_PAGE_CHARS } from '../config';
 import type { ContentRequest, ContentResponse } from '../types';
 import { chunkBlocks } from './chunk';
 import { extractVisibleBlocks } from './extract';
-import { clearHighlights, highlightTopResult, jumpTo } from './highlight';
+import { clearHighlights, highlightResults, jumpTo } from './highlight';
 
 declare global {
   interface Window {
@@ -28,7 +28,8 @@ if (!window.__pageLensLoaded) {
           }
 
           const chunks = await chunkBlocks(blocks);
-          if (chunks.length === 0 || estimateRequestTokens('', chunks) > MAX_STATE_TOKENS) {
+          const chars = chunks.reduce((sum, chunk) => sum + chunk.text.length, 0);
+          if (chunks.length === 0 || chars > MAX_PAGE_CHARS) {
             sendResponse({ type: 'ERROR', reason: 'TOO_MUCH_TEXT' });
             return;
           }
@@ -39,7 +40,7 @@ if (!window.__pageLensLoaded) {
       }
 
       if (message.type === 'HIGHLIGHT') {
-        highlightTopResult(message.results);
+        highlightResults(message.results, message.terms);
         return false;
       }
 
