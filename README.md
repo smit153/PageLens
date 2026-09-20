@@ -24,7 +24,7 @@ _Ask a question, get the passage that answers it — ranked, scored, and marked 
      link, and a <video> tag is stripped by GitHub's sanitiser. The source file is
      assets/demo.mp4; the URL above is GitHub's own copy, which is what plays. -->
 
-https://github.com/user-attachments/assets/31c56d2d-fbb5-43ed-8219-b11f82088cc0
+https://github.com/user-attachments/assets/52f34e86-1001-4a9d-8538-1432ff42c5d6
 
 </div>
 
