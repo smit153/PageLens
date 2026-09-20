@@ -135,10 +135,14 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ type: 'RESULTS', results });
 
           if (results.length > 0) {
+            // A question is answered by a sentence, not by its own words
+            // scattered across the page, so it sends no terms to mark and
+            // leans on the refine pass's answer span instead.
+            const policy = policyFor(message.query);
             const highlight: ContentRequest = {
               type: 'HIGHLIGHT',
               results,
-              terms: extractTerms(message.query),
+              terms: policy.markTerms ? extractTerms(message.query) : [],
             };
             await chrome.tabs.sendMessage(tabId, highlight);
           }

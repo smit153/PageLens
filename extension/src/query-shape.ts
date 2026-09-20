@@ -25,6 +25,15 @@ interface ShapePolicy {
   topN: number;
   /** Whether to run the proxy's sentence-level second pass. */
   refine: boolean;
+  /**
+   * Whether literal query terms should be marked in the page.
+   *
+   * For a keyword or a phrase the words you typed *are* what you are looking
+   * for. For a question they are not: "how do plants turn sunlight into food"
+   * is asking for one sentence, and marking every "plants" and "sunlight" on a
+   * photosynthesis article buries that answer in noise.
+   */
+  markTerms: boolean;
 }
 
 /**
@@ -34,10 +43,12 @@ interface ShapePolicy {
  * and pays for the refine pass that pinpoints the sentence.
  */
 export const SHAPE_POLICY: Record<QueryShape, ShapePolicy> = {
-  keyword: { minScore: 1.2, topN: 10, refine: false },
-  phrase: { minScore: 1.5, topN: 8, refine: true },
-  question: { minScore: 1.8, topN: 5, refine: true },
+  keyword: { minScore: 1.2, topN: 10, refine: false, markTerms: true },
+  phrase: { minScore: 1.5, topN: 8, refine: true, markTerms: true },
+  question: { minScore: 1.8, topN: 5, refine: true, markTerms: false },
 };
+
+export type { ShapePolicy };
 
 export function policyFor(query: string): ShapePolicy {
   return SHAPE_POLICY[detectQueryShape(query)];

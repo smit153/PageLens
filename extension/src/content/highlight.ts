@@ -21,8 +21,15 @@ function ensureStyles(): void {
   style.textContent = `
     mark.${MARK_EXACT},
     mark.${MARK_SEMANTIC} {
-      border-radius: 2px;
-      padding: 0 1px;
+      /* Square and flush, deliberately. A highlighted sentence is wrapped one
+         text node at a time, because a Range that crosses element boundaries
+         cannot be wrapped in one go -- and on a heavily linked page like a
+         Wikipedia article that is a separate mark every other word. Rounded
+         corners or horizontal padding put a visible seam at each of those
+         joins, so one sentence reads as a box drawn around every single word.
+         Flush edges let the run render as one continuous highlight. */
+      border-radius: 0;
+      padding: 0;
       scroll-margin: 120px;
     }
     mark.${MARK_EXACT},
@@ -219,9 +226,14 @@ export function jumpTo(ref: string): void {
  * Highlights every result on the page, not just the best one, so a passage
  * listed in the popup is never sitting unmarked in plain view.
  *
- * Each result is marked as precisely as it can be: the literal terms for an
- * exact hit, the answer sentence for a semantic one, and only if neither can
- * be located does it fall back to framing the whole block.
+ * Each result is marked as precisely as it can be, most precise first: the
+ * answer sentence if the refine pass found one, else the literal query terms,
+ * and only if neither can be located does it fall back to framing the block.
+ *
+ * The span has to be tried first. Keying this on `matchKind` instead meant that
+ * a passage containing any query word at all -- "plants" on a page about
+ * photosynthesis -- got its words scattered with marks and threw away the exact
+ * sentence the refine pass had already paid for.
  */
 export function highlightResults(results: RankedResult[], terms: string[]): void {
   ensureStyles();
@@ -231,12 +243,14 @@ export function highlightResults(results: RankedResult[], terms: string[]): void
     const el = elementForRef(result.ref);
     if (!el) continue;
 
-    let marked = result.matchKind === 'exact' ? markTerms(el, terms) : 0;
+    let marked = 0;
 
-    if (marked === 0 && result.span) {
+    if (result.span) {
       const range = rangeForText(el, result.span);
       if (range) marked = markRange(range, MARK_SEMANTIC);
     }
+
+    if (marked === 0) marked = markTerms(el, terms);
 
     if (marked === 0) el.classList.add(BLOCK_SOFT_CLASS);
   }
