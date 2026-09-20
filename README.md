@@ -85,15 +85,14 @@ pnpm build:extension                            # then load extension/dist at ch
 
 ### Run modes
 
-| Mode         | Best for     | Proxy runs on          | Rate limiter                             | Command                               |
-| ------------ | ------------ | ---------------------- | ---------------------------------------- | ------------------------------------- |
-| **Local**    | developing   | Node, `localhost:3000` | `RATE_LIMIT_DISABLED=1`, or real Upstash | `pnpm dev:proxy`                      |
-| **Deployed** | everyday use | Vercel Edge Function   | Upstash Redis, **required**              | `pnpm --filter pagelens-proxy deploy` |
+| Mode         | Best for     | Proxy runs on          | Command                               |
+| ------------ | ------------ | ---------------------- | ------------------------------------- |
+| **Local**    | developing   | Node, `localhost:3000` | `pnpm dev:proxy`                      |
+| **Deployed** | everyday use | Vercel Edge Function   | `pnpm --filter pagelens-proxy deploy` |
 
-> **The deployed proxy is public and spends real money.** It is unauthenticated by design — the
-> extension ships no credentials — so it is rate limited by IP and by browser install, and it
-> **fails closed**: if the limiter cannot be reached, the request is refused rather than billed.
-> Set a spend cap on your AI Gateway before pointing anyone else at it.
+> **A deployed proxy is public and spends real money.** It has no auth and no rate limiting, so
+> anyone who finds the URL can spend your AI Gateway credit. Set a spend cap before you deploy
+> one, and add a limiter before pointing anyone else at it.
 
 ## Architecture
 
@@ -106,15 +105,12 @@ flowchart TD
     end
     subgraph SRV["Your proxy — holds the API key"]
         X["Vercel Edge Function"]
-        L["Rate limiter<br/>Upstash sliding window"]
         J["typesafe-ai/jev<br/>via Vercel AI Gateway"]
     end
     P -->|"query"| B
     B -->|"extract"| C
     C -->|"every passage on the page"| B
     B -->|"POST query + chunks"| X
-    X --> L
-    L -->|"429 if over budget"| X
     X -->|"parallel batches"| J
     J -->|"score 0-3 per passage"| X
     X -->|"scores, spans"| B
@@ -128,23 +124,20 @@ flowchart TD
 | Background worker | MV3 service worker   | orchestrates everything; the only piece that calls the proxy |
 | Content script    | the active tab       | extracts passages, highlights matches, scrolls               |
 | Proxy             | Vercel Edge Function | holds the key, batches passages, calls Jev                   |
-| Rate limiter      | Upstash Redis        | meters searches in Jev calls, not HTTP requests              |
 
-Three details that are load-bearing rather than incidental:
+Two details that are load-bearing rather than incidental:
 
 - **No static `content_scripts` entry.** The content script is injected on demand under
   `activeTab`, so the extension needs no broad host permissions — only your own proxy's origin.
 - **The whole page is scored, not a sample.** The proxy splits passages into batches that each fit
   a Jev call and fans them out in parallel.
-- **Cost is metered in model calls.** One request can be nine Jev calls, so the rate limiter
-  charges what a request actually costs.
 
 ## Documentation
 
 | Document                                       | What is in it                                                      |
 | ---------------------------------------------- | ------------------------------------------------------------------ |
 | [`docs/SETUP.md`](docs/SETUP.md)               | Step-by-step setup, from clone to searching, plus troubleshooting  |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Message contracts, request/response shapes, rate-limit tiers       |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Message contracts and request/response shapes                      |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)     | Deploying the proxy, env vars, build-error reference               |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md)           | Dev setup, commit conventions, pre-PR checklist                    |
 | [`CLAUDE.md`](CLAUDE.md)                       | Why the code is shaped this way, and the exact Jev/AI SDK contract |
@@ -160,8 +153,8 @@ Three details that are load-bearing rather than incidental:
   question. See `extension/src/query-shape.ts`.
 - **No answer means no answer.** A page with nothing relevant says so, rather than listing
   confidently-ranked irrelevant passages.
-- **The proxy is open but limited** — 60 Jev calls per minute per IP, 30 per browser install.
-  There is no auth; the limiter is cost control, not authentication.
+- **No auth and no rate limiting on the proxy.** Deliberate for v1; add both before exposing a
+  deployment to anyone else.
 
 ## Tooling
 

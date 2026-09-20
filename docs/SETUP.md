@@ -1,20 +1,19 @@
 # Setup
 
 From a fresh clone to searching a page. If you only want to change code and already have the
-proxy running, steps 1 and 6 are all you need.
+proxy running, steps 1 and 5 are all you need.
 
 For _why_ the pieces fit together this way, see [`ARCHITECTURE.md`](ARCHITECTURE.md). For the
 deployment details this guide summarises, see [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## Prerequisites
 
-| You need           | Version        | Notes                                                                |
-| ------------------ | -------------- | -------------------------------------------------------------------- |
-| Node.js            | 22.18+ or 24.x | The proxy dev server runs TypeScript directly; tested on 24.18       |
-| pnpm               | 11.x           | `corepack enable` picks up the pinned version from `package.json`    |
-| Chrome             | any MV3 build  | Or another Chromium browser with `chrome://extensions`               |
-| A Vercel account   | free tier      | For the AI Gateway key; a card must be on file even for free credits |
-| An Upstash account | free tier      | Backs the rate limiter. Optional for local dev only                  |
+| You need         | Version        | Notes                                                                |
+| ---------------- | -------------- | -------------------------------------------------------------------- |
+| Node.js          | 22.18+ or 24.x | The proxy dev server runs TypeScript directly; tested on 24.18       |
+| pnpm             | 11.x           | `corepack enable` picks up the pinned version from `package.json`    |
+| Chrome           | any MV3 build  | Or another Chromium browser with `chrome://extensions`               |
+| A Vercel account | free tier      | For the AI Gateway key; a card must be on file even for free credits |
 
 The Node floor is not arbitrary: `proxy/dev-server.ts` uses native TypeScript execution and
 `node:module`'s `registerHooks`, both of which need 22.18 or newer.
@@ -39,22 +38,10 @@ reach the extension bundle.
 2. **Add a payment card to the Vercel account.** The Gateway rejects every request with
    `403 customer_verification_required` until one is on file — this applies even to the free
    credits.
-3. Set a **spend cap** while you are there. The proxy is rate limited, but a cap is the only hard
-   ceiling on what a runaway can cost you.
+3. Set a **spend cap** while you are there. The proxy has no rate limiting, so a cap is the only
+   ceiling on what a runaway — or anyone who finds your deployed URL — can cost you.
 
-## 3. Create the Upstash database
-
-The rate limiter stores its sliding window in Upstash Redis and **fails closed** — without
-credentials, every search is refused rather than billed.
-
-1. Create a database from the Vercel dashboard's **Storage → Upstash**, or at
-   [console.upstash.com](https://console.upstash.com).
-2. Copy its **REST** URL and token (not the `redis://` connection string — the Edge Runtime has no
-   TCP sockets, so the limiter speaks Upstash's HTTP protocol).
-
-The free tier is ample: one search costs two Redis commands.
-
-## 4. Fill in the environment file
+## 3. Fill in the environment file
 
 ```bash
 cp proxy/.env.local.example proxy/.env.local
@@ -64,17 +51,11 @@ Then edit `proxy/.env.local`:
 
 ```bash
 AI_GATEWAY_API_KEY=<your key from step 2>
-UPSTASH_REDIS_REST_URL=https://<your-db>.upstash.io
-UPSTASH_REDIS_REST_TOKEN=<your token from step 3>
 ```
-
-To develop without an Upstash database, skip the last two and set `RATE_LIMIT_DISABLED=1`
-instead. That is an explicit opt-out by design — missing credentials never silently become "no
-rate limiting".
 
 This file is gitignored. Never commit it.
 
-## 5. Run the proxy locally
+## 4. Run the proxy locally
 
 ```bash
 pnpm dev:proxy   # http://localhost:3000/api/search
@@ -107,10 +88,9 @@ You should get a 3 for `c0` and a 0 for `c1`:
 }
 ```
 
-A `200` here proves more than it looks: because the limiter fails closed, a successful search
-means your Upstash credentials work too.
+A `200` here means the Gateway key works and the whole extract-score path is wired up.
 
-## 6. Build and load the extension
+## 5. Build and load the extension
 
 ```bash
 pnpm build:extension
@@ -134,7 +114,7 @@ Then rebuild. For iterative work, `pnpm dev:extension` runs the three builds in 
 does not notice file changes, so click the extension's reload icon after each rebuild, and reload
 the page you are testing on.
 
-## 7. Deploy the proxy
+## 6. Deploy the proxy
 
 ```bash
 pnpm --filter pagelens-proxy deploy   # vercel deploy --prod
@@ -144,11 +124,10 @@ Or connect the repo at [vercel.com/new](https://vercel.com/new) and set **Root D
 `proxy`. The Git-connected route builds with the committed lockfile, so you get the dependency
 versions you tested against.
 
-**Set all three environment variables** in the project's **Settings → Environment Variables**
-before or immediately after the first deploy — `.env.local` covers local development only.
-Without the Upstash pair, every search returns a 503.
+**Set `AI_GATEWAY_API_KEY`** in the project's **Settings → Environment Variables** before or
+immediately after the first deploy — `.env.local` covers local development only.
 
-Then point the extension at the deployed URL, the same two files as in step 6, and rebuild.
+Then point the extension at the deployed URL, the same two files as in step 5, and rebuild.
 
 ## Verifying a deployment
 
@@ -158,21 +137,19 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<your-proxy>/api/search
   -d '{"query":"pricing","chunks":[{"id":"c0","text":"Plans start at $9/month."}]}'
 ```
 
-`200` means the Gateway key, the Upstash credentials and the limiter are all working.
+`200` means the Gateway key is set and the function is serving.
 
 ## Troubleshooting
 
-| Symptom                                               | Cause                                                    | Fix                                                                      |
-| ----------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `500` — "Proxy is misconfigured"                      | `AI_GATEWAY_API_KEY` not set                             | Add it to `.env.local`, or to the Vercel project for a deployment        |
-| `503` — "temporarily unavailable"                     | The limiter cannot reach Upstash; it fails closed        | Set the two `UPSTASH_*` vars, or `RATE_LIMIT_DISABLED=1` for local dev   |
-| `429` — "Too many searches"                           | Over budget: 60 Jev calls/min per IP, 30 per install     | Wait for `Retry-After`, or raise the limits in `proxy/lib/rate-limit.ts` |
-| `403 customer_verification_required`                  | No card on the Vercel account                            | Add one; this applies even to free credits                               |
-| `502` — "The relevance model call failed"             | Every Jev batch failed upstream                          | Usually transient; retry. Persistent means the Gateway is rejecting you  |
-| Build: `referencing unsupported modules: ../lib/*.ts` | An import used a literal `.ts` extension                 | Use `.js` specifiers pointing at the `.ts` source — see `CLAUDE.md`      |
-| Popup: "Could not reach the search proxy"             | `PROXY_SEARCH_URL` and `host_permissions` disagree       | Make both match, rebuild, reload the extension                           |
-| Popup: "No readable text was found"                   | The page is a PDF viewer, canvas app, or otherwise empty | Expected; PageLens reads the DOM only                                    |
-| Extension changes do not appear                       | Chrome caches the loaded build                           | Reload at `chrome://extensions`, then reload the page                    |
+| Symptom                                               | Cause                                                    | Fix                                                                     |
+| ----------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `500` — "Proxy is misconfigured"                      | `AI_GATEWAY_API_KEY` not set                             | Add it to `.env.local`, or to the Vercel project for a deployment       |
+| `403 customer_verification_required`                  | No card on the Vercel account                            | Add one; this applies even to free credits                              |
+| `502` — "The relevance model call failed"             | Every Jev batch failed upstream                          | Usually transient; retry. Persistent means the Gateway is rejecting you |
+| Build: `referencing unsupported modules: ../lib/*.ts` | An import used a literal `.ts` extension                 | Use `.js` specifiers pointing at the `.ts` source — see `CLAUDE.md`     |
+| Popup: "Could not reach the search proxy"             | `PROXY_SEARCH_URL` and `host_permissions` disagree       | Make both match, rebuild, reload the extension                          |
+| Popup: "No readable text was found"                   | The page is a PDF viewer, canvas app, or otherwise empty | Expected; PageLens reads the DOM only                                   |
+| Extension changes do not appear                       | Chrome caches the loaded build                           | Reload at `chrome://extensions`, then reload the page                   |
 
 ## Checks before a pull request
 

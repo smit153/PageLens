@@ -63,56 +63,27 @@ Run it from `proxy/` (the script already does). On first deploy, confirm the pro
 Directory** is `proxy` if the project is Git-connected — otherwise Vercel builds from the repo
 root and won't find `api/search.ts`.
 
-Note the resulting production URL (e.g. `https://pagelens-proxy.vercel.app`). The search endpoint
+Note the resulting production URL (e.g. `https://<your-project>.vercel.app`). The search endpoint
 is `<that URL>/api/search`.
 
 If you outgrow the default domain, add a custom domain under **Project Settings -> Domains** —
 just remember to update `PROXY_SEARCH_URL` and `host_permissions` (below) to match.
 
-### Rate limiting
+### Rate limiting (deliberately out of scope)
 
-The proxy meters every search against a sliding window in Upstash Redis, and **fails closed** — if
-it can't reach Redis, it refuses the request rather than letting model spend go unmetered. So the
-credentials below are required for any deployment.
+The proxy has no rate limiting or auth (see `CLAUDE.md` for why). Anyone who finds the URL can
+spend your AI Gateway credit, so set a **spend cap** on the Gateway before deploying, and add a
+limiter before pointing anyone else at it.
 
-Budgets are counted in **Jev calls, not HTTP requests**, because one request can cost up to nine
-model calls (see `CLAUDE.md`):
-
-| Tier    | Key                                           | Budget                |
-| ------- | --------------------------------------------- | --------------------- |
-| IP      | `x-forwarded-for`, set by Vercel              | 60 Jev calls / minute |
-| Install | `x-pagelens-install`, minted by the extension | 30 Jev calls / minute |
-
-Both must pass. The install tier is checked first, so one browser that has exhausted its own
-budget can't drain the IP budget it shares with everyone else behind the same NAT.
-
-1. Create a Redis database — Vercel dashboard **Storage -> Upstash**, or directly at
-   `https://console.upstash.com`. The free tier (10k commands/day) is ample: a search costs two
-   commands.
-2. Copy its REST credentials into `proxy/.env.local` **and** the Vercel project's Environment
-   Variables:
-
-   ```
-   UPSTASH_REDIS_REST_URL=https://<your-db>.upstash.io
-   UPSTASH_REDIS_REST_TOKEN=<token>
-   ```
-
-3. To run locally without an Upstash database, set `RATE_LIMIT_DISABLED=1` in `proxy/.env.local`.
-   This is an explicit opt-out so that missing credentials can never quietly become "no limiting";
-   never set it in a deployed environment.
-
-Tuning the numbers: `IP_CALLS_PER_MINUTE` and `INSTALL_CALLS_PER_MINUTE` in
-`proxy/lib/rate-limit.ts`.
-
-A limited client gets a `429` with a `Retry-After` header and a `retryAfter` field in the JSON
-body; the extension turns that into a "try again in Ns" message in the popup rather than a generic
-failure.
+If you do add one, meter it in **Jev calls, not HTTP requests**: `batchChunks()` turns one request
+into up to `MAX_BATCHES` concurrent model calls plus a refine pass, so a request-counting limiter
+charges a 960-chunk caller the same as a 5-chunk one.
 
 ### Build error: "referencing unsupported modules"
 
 ```
 The Edge Function "api/search" is referencing unsupported modules:
-  ../lib/jev.ts, ../lib/sentences.ts, ../lib/rate-limit.ts
+  ../lib/jev.ts, ../lib/sentences.ts
 ```
 
 Something in `api/` or `lib/` is importing with a literal `.ts` extension. Vercel compiles each
