@@ -1,3 +1,4 @@
+import { MAX_SCORE } from '../config';
 import type { BackgroundRequest, BackgroundResponse, RankedResult } from '../types';
 
 const form = document.querySelector<HTMLFormElement>('#search-form')!;
@@ -7,9 +8,9 @@ const resultsEl = document.querySelector<HTMLOListElement>('#results')!;
 const pageUrlEl = document.querySelector<HTMLSpanElement>('#page-url')!;
 const shortcutEl = document.querySelector<HTMLElement>('#shortcut-badge')!;
 
-/** Jev scores against a 4-level rubric indexed from zero, so 3 is a perfect match. */
-const MAX_SCORE = 3;
 const SNIPPET_LIMIT = 190;
+/** Characters of lead-in kept when a snippet has to scroll to reach its span. */
+const SPAN_CONTEXT = 40;
 
 // Mirrors the manifest's `commands` binding: Command+Shift+F on mac, Ctrl+Shift+F elsewhere.
 shortcutEl.textContent = navigator.userAgent.includes('Mac') ? '⌘⇧F' : '⌃⇧F';
@@ -96,6 +97,45 @@ function highlightTerms(text: string, query: string): DocumentFragment {
   return fragment;
 }
 
+/**
+ * Trims a passage to snippet length while keeping its answer span visible. A
+ * span near the end of a long passage would otherwise be cut off entirely,
+ * leaving the card showing everything except the part that answers the query.
+ */
+function buildSnippet(result: RankedResult): string {
+  const { text, span } = result;
+  if (text.length <= SNIPPET_LIMIT) return text;
+
+  const spanStart = span ? text.indexOf(span) : -1;
+  if (spanStart === -1 || spanStart + span!.length <= SNIPPET_LIMIT) {
+    return `${text.slice(0, SNIPPET_LIMIT).trimEnd()}…`;
+  }
+
+  const start = Math.max(0, spanStart - SPAN_CONTEXT);
+  const end = Math.min(text.length, start + SNIPPET_LIMIT);
+  return `${start > 0 ? '…' : ''}${text.slice(start, end).trim()}${end < text.length ? '…' : ''}`;
+}
+
+/** Bolds the answer sentence within a snippet, text nodes only. */
+function highlightSpan(text: string, span: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const start = text.indexOf(span);
+
+  if (start === -1) {
+    fragment.appendChild(document.createTextNode(text));
+    return fragment;
+  }
+
+  if (start > 0) fragment.appendChild(document.createTextNode(text.slice(0, start)));
+  const strong = document.createElement('strong');
+  strong.textContent = span;
+  fragment.appendChild(strong);
+  const rest = text.slice(start + span.length);
+  if (rest) fragment.appendChild(document.createTextNode(rest));
+
+  return fragment;
+}
+
 function renderResults(results: RankedResult[], query: string): void {
   clearState();
   resultsEl.replaceChildren();
@@ -104,17 +144,33 @@ function renderResults(results: RankedResult[], query: string): void {
     const card = document.createElement('li');
     card.className = 'result-card';
 
-    const score = document.createElement('div');
+    const meta = document.createElement('div');
+    meta.className = 'card-meta';
+
+    const score = document.createElement('span');
     score.className = 'match-score';
     score.textContent = `${Math.round((result.score / MAX_SCORE) * 100)}% MATCH`;
 
+    const pill = document.createElement('span');
+    pill.className = `pill pill-${result.matchKind}`;
+    pill.textContent = result.matchKind === 'exact' ? 'Exact' : 'Semantic';
+    pill.title =
+      result.matchKind === 'exact'
+        ? 'Contains the words you typed'
+        : 'Matched on meaning, not wording';
+
+    meta.append(score, pill);
+
     const snippet = document.createElement('p');
     snippet.className = 'snippet';
-    const text =
-      result.text.length > SNIPPET_LIMIT
-        ? `${result.text.slice(0, SNIPPET_LIMIT).trimEnd()}…`
-        : result.text;
-    snippet.appendChild(highlightTerms(text, query));
+    const text = buildSnippet(result);
+    // Bold the answer sentence when the refine pass found one -- it is chosen
+    // on meaning, so it stays right for a query whose words never appear in
+    // the passage. Keyword searches skip that pass, so they fall back to
+    // literal term matching.
+    snippet.appendChild(
+      result.span ? highlightSpan(text, result.span) : highlightTerms(text, query),
+    );
 
     const actions = document.createElement('div');
     actions.className = 'card-actions';
@@ -128,7 +184,7 @@ function renderResults(results: RankedResult[], query: string): void {
     });
     actions.appendChild(jump);
 
-    card.append(score, snippet, actions);
+    card.append(meta, snippet, actions);
     resultsEl.appendChild(card);
   }
 }
