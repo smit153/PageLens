@@ -8,13 +8,18 @@ import {
   batchChunks,
 } from '../lib/jev.ts';
 import { splitSentences } from '../lib/sentences.ts';
+import { checkLimit, identify } from '../lib/rate-limit.ts';
 
 export const config = { runtime: 'edge' };
 
-function jsonResponse(body: SearchResponseBody, status: number): Response {
+function jsonResponse(
+  body: SearchResponseBody,
+  status: number,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
   });
 }
 
@@ -183,6 +188,29 @@ export default async function handler(request: Request): Promise<Response> {
       `Page needs ${batches.length} batches; scoring the first ${MAX_BATCHES} and dropping the rest.`,
     );
     batches.length = MAX_BATCHES;
+  }
+
+  // Metered after batching, because the cost of a request is not known until
+  // then, but before the fan-out, because that is the first thing that spends
+  // money. Everything between validation and here is local and free.
+  //
+  // The refine pass is charged optimistically when it is requested: whether it
+  // finds any candidate worth refining is only knowable after pass one, and
+  // over-charging by one call is the safe direction to be wrong in.
+  const cost = batches.length + (body.refine === true ? 1 : 0);
+  const verdict = await checkLimit(identify(request), cost);
+
+  if (!verdict.ok) {
+    const error =
+      verdict.reason === 'over-limit'
+        ? `Too many searches. Try again in ${verdict.retryAfter}s.`
+        : 'Search is temporarily unavailable. Please try again shortly.';
+
+    return jsonResponse(
+      { ok: false, error, retryAfter: verdict.retryAfter },
+      verdict.reason === 'over-limit' ? 429 : 503,
+      { 'retry-after': String(verdict.retryAfter) },
+    );
   }
 
   // Fanned out concurrently, so covering the whole page costs roughly the

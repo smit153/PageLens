@@ -37,4 +37,11 @@ export interface Coverage {
 }
 
 export type SearchResponseBody =
-  { ok: true; scores: ScoredChunk[]; coverage: Coverage } | { ok: false; error: string };
+  | { ok: true; scores: ScoredChunk[]; coverage: Coverage }
+  | {
+      ok: false;
+      error: string;
+      /** Seconds to wait before retrying. Only set on a rate-limited (429) or
+       *  temporarily-unavailable response, so the client can say how long. */
+      retryAfter?: number;
+    };
