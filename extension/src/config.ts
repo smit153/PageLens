@@ -1,7 +1,8 @@
-// LOCAL DEV: `pnpm dev:proxy` serves this on port 3000. Switch this (and
-// host_permissions in public/manifest.json) to your deployed proxy's URL
-// before shipping (see README.md "Deploying the proxy").
-export const PROXY_SEARCH_URL = 'http://localhost:3000/api/search';
+// The deployed proxy. To develop against a local one, switch this to
+// `http://localhost:3000/api/search` (what `pnpm dev:proxy` serves) and change
+// host_permissions in public/manifest.json to match -- both have to agree, or
+// the fetch is blocked. See README.md "Deploying the proxy".
+export const PROXY_SEARCH_URL = 'https://pagelens-ten.vercel.app/api/search';
 
 /**
  * Absolute ceiling on chunks sent per search, matching the proxy's own cap.
