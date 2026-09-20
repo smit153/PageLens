@@ -17,6 +17,6 @@
       }
     }
   },
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting"],
   "host_permissions": ["http://localhost:3000/*"]
 }

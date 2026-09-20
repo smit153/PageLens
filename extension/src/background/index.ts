@@ -1,5 +1,4 @@
 import { PROXY_SEARCH_URL } from '../config';
-import { getInstallId } from '../install-id';
 import { extractTerms, hasExactMatch } from '../lexical';
 import { policyFor } from '../query-shape';
 import type {
@@ -42,7 +41,6 @@ interface ProxyScoreResponse {
   scores?: Array<{ id: string; score: number; span?: string }>;
   coverage?: { scored: number; total: number };
   error?: string;
-  retryAfter?: number;
 }
 
 async function scoreChunks(query: string, chunks: Chunk[]): Promise<RankedResult[]> {
@@ -50,20 +48,11 @@ async function scoreChunks(query: string, chunks: Chunk[]): Promise<RankedResult
   // refine pass is worth paying for. See extension/src/query-shape.ts.
   const policy = policyFor(query);
 
-  // Lets the proxy meter this browser rather than the whole IP it shares. Sent
-  // as a plain header, which needs no CORS preflight here because the proxy's
-  // origin is in host_permissions. Omitted if storage is unavailable -- the
-  // proxy just falls back to its IP ceiling.
-  const installId = await getInstallId();
-
   let res: Response;
   try {
     res = await fetch(PROXY_SEARCH_URL, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(installId ? { 'x-pagelens-install': installId } : {}),
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         query,
         chunks: chunks.map(({ id, text }) => ({ id, text })),
@@ -76,18 +65,6 @@ async function scoreChunks(query: string, chunks: Chunk[]): Promise<RankedResult
   }
 
   const body = (await res.json().catch(() => null)) as ProxyScoreResponse | null;
-
-  // Rate limited. Worth its own message: the fix is to wait, not to retry
-  // immediately or to go looking for a broken connection.
-  if (res.status === 429 || res.status === 503) {
-    const seconds = typeof body?.retryAfter === 'number' ? body.retryAfter : 60;
-    const wait = seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds}s`;
-    throw new Error(
-      res.status === 429
-        ? `Too many searches. Try again in ${wait}.`
-        : `Search is temporarily unavailable. Try again in ${wait}.`,
-    );
-  }
 
   if (!res.ok || !body?.ok || !body.scores) {
     throw new Error(body?.error ?? `Search failed (HTTP ${res.status}).`);
