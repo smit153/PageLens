@@ -8,8 +8,6 @@
     "deploy": "vercel deploy --prod"
   },
   "dependencies": {
-    "@upstash/ratelimit": "^2.1.0",
-    "@upstash/redis": "^1.38.4",
     "ai": "^7.0.107"
   },
   "devDependencies": {
