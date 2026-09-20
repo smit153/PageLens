@@ -21,13 +21,16 @@ for why.
 ```
 popup --SEARCH{query}--> background --executeScript+EXTRACT--> content script
                              |                                      |
-                             |<--------------- chunks --------------|
+                             |<------------ all chunks -------------|
                              |
-                             |--POST {query, chunks}--> proxy --evaluate()--> Jev (via AI Gateway)
-                             |<--------------- scores ------------------------|
+                             |--POST {query, chunks, refine, minScore}--> proxy
+                             |                                             |
+                             |             parallel batches --evaluate()--> Jev (via AI Gateway)
+                             |             optional refine pass --------->  Jev
+                             |<------------ scores, spans, coverage -------|
                              |
-                             |--RESULTS{top 8}--> popup (renders list)
-                             |--HIGHLIGHT{top 8}--> content script (highlights #1, auto-scrolls)
+                             |--RESULTS{ranked}--> popup (list + match-kind pills)
+                             |--HIGHLIGHT{results, terms}--> content script (marks every result)
 
 popup --JUMP{ref}--> background --JUMP--> content script (scrolls to that ref)
 ```
@@ -68,9 +71,9 @@ Vite's single-entry `build.lib` mode instead.
 explicit user request), not hand-rolled splitting logic. It only runs on DOM blocks longer than
 `CHUNK_SIZE` (400 chars) — most paragraphs/list items pass through as a single chunk with their
 own `data-pagelens-id` anchor already attached; splitting a block produces multiple chunks that
-all point back to the same anchor (scrolling to any of them lands in the right place). Total
-chunk count is capped at 40 by evenly sampling across the page (`downsampleEvenly`), not
-truncating the tail, so long articles still get full-page coverage.
+all point back to the same anchor (scrolling to any of them lands in the right place). `MAX_CHUNKS`
+is now a pathological-page guard rather than a sampling cap — every chunk gets scored, because the
+proxy batches them.
 
 **Rate limiting was skipped for v1** (explicit user decision — the alternative, a real
 distributed limiter, needs Vercel KV/Upstash or similar, an external service the rest of the
@@ -78,24 +81,61 @@ stack doesn't otherwise need; an in-memory Edge Function limiter is best-effort 
 it's not shared across regions or cold starts). If this proxy is ever deployed somewhere it'll get
 real traffic, add one before relying on it being "protected."
 
-**Top-1 highlighted + auto-scroll only** (explicit user decision over highlighting all N ranks).
-Ranks 2-8 appear only in the popup list, click-to-jump. See `highlightTopResult` in
+**Every result is marked, auto-scrolling to the best one.** This started as top-1 only, by explicit
+user decision, and was reversed once results became precise enough not to be noisy: a passage
+listed in the popup could otherwise sit unmarked in plain view on screen. See `highlightResults` in
 `extension/src/content/highlight.ts`.
 
-**Duplicated constants/types between `extension/` and `proxy/`** (`MAX_CHUNKS`,
-`estimateRequestTokens`, the `Chunk`/`score` shapes) rather than a shared workspace package. The
-two packages build for completely different runtimes (browser content script vs. Vercel Edge
-Function) and deploy independently; a third `shared` package would need its own build step for
-both consumers for a handful of small interfaces/constants. If these ever drift out of sync,
-that's the tradeoff — check both `extension/src/config.ts` and `proxy/lib/jev.ts` when changing
-budget/limit numbers.
+**Duplicated constants/types between `extension/` and `proxy/`** (`MAX_CHUNKS`, the `Chunk`/`score`
+shapes) rather than a shared workspace package. The two packages build for completely different
+runtimes (browser content script vs. Vercel Edge Function) and deploy independently; a third
+`shared` package would need its own build step for both consumers for a handful of small
+interfaces/constants. If these ever drift out of sync, that's the tradeoff — check both
+`extension/src/config.ts` and `proxy/lib/jev.ts` when changing limits.
 
-**Token budget is a heuristic, not exact.** `estimateRequestTokens` uses a ~4-chars-per-token
-approximation plus a flat per-question overhead — there's no tokenizer dependency on either side.
-The content script's own cap (40 chunks × 400 chars) keeps requests comfortably under budget in
-practice; the token estimate is a defense-in-depth check (in `content/index.ts` before ever
-messaging the background worker, and again in the proxy before calling `evaluate()`) for
-pathological pages, not the primary control.
+The token budget deliberately is **not** duplicated. It lives only in `proxy/lib/jev.ts`, which
+owns the Jev contract; the extension just caps total characters as a message-size guard. Two copies
+of a number that was already measured wrong once is not a tradeoff worth taking.
+
+## Jev's usable limits are far below its documented context
+
+Measure before trusting a number here. Two cases have already bitten:
+
+- **Batch size.** The documented context is ~32k tokens, but 89 questions / ~15.1k tokens works
+  repeatedly while ~118 questions / ~20k tokens gets persistent 503s. `BATCH_TOKEN_BUDGET` (12k)
+  and `MAX_QUESTIONS_PER_BATCH` (80) are set from that, not from the docs. An oversized batch does
+  not degrade, it fails outright and silently costs page coverage.
+- **The token estimator.** `chars/4 + 40` per question undercounted real usage by ~30%. The model
+  in `proxy/lib/jev.ts` (`180 + 79·chunks + 0.25·chars`) is fitted to measured requests.
+
+When changing either, re-measure with `result.usage.inputTokens` rather than reasoning from the
+published context window.
+
+## Each question must name its own chunk id
+
+Every question in an `evaluate()` call shares one state containing the whole batch. With identical
+instructions, nothing distinguishes them and Jev answers the same question N times — observed as
+scores of `2.95, 2.95, 2.96, 2.96` on passages that should have ranged 0 to 3. Naming the id in the
+instructions fixed the same four to `0, 3, 0, 1.19`. This applies to both passes.
+
+## Highlighting wraps `mark` elements, not the Custom Highlight API
+
+`CSS.highlights` is tidier and needs no DOM mutation, but a highlight registered from a content
+script's isolated world appeared never to reach the page's renderer. That was never confirmed, so
+the code does not depend on it.
+
+Since wrapping mutates someone else's DOM, `clearHighlights` must stay exact: it unwraps every mark
+and calls `normalize()`, and `textContent` was verified identical before and after. Ranges are
+wrapped one text node at a time (`surroundContents` only reliably handles a range that does not
+cross element boundaries, and highlighted sentences routinely contain links and citation
+superscripts), working backwards through matches because each wrap splits the node.
+
+## Do not reach for Jev where a string operation will do
+
+Query shape (`extension/src/query-shape.ts`) and exact-match classification
+(`extension/src/lexical.ts`) are both plain regex work done locally. They are deterministic, free
+and instant, and Jev sits _downstream_ of them, so a model call there would cost latency and money
+and still not answer better. Jev's judgement is for meaning.
 
 ## Local proxy dev uses `dev-server.ts`, not `vercel dev`
 

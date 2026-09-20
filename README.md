@@ -8,20 +8,22 @@ generated text) via the Vercel AI SDK's `experimental_evaluate()`.
 ## How it works
 
 1. **Content script** walks the visible DOM (paragraphs, list items, headings — skipping
-   nav/footer/script/style), and uses LangChain's `RecursiveCharacterTextSplitter` to break long
-   blocks into passages. Output is capped at 40 chunks, sampled evenly across the page so long
-   pages don't just lose their tail.
+   nav/footer/script/style and citation containers), and uses LangChain's
+   `RecursiveCharacterTextSplitter` to break long blocks into passages.
 2. **Popup** sends the query to the **background service worker**.
 3. **Background worker** injects the content script (via `activeTab` + `scripting`, granted when
    you open the popup — no broad host permissions needed), collects the chunks, and POSTs
    `{ query, chunks }` to the **proxy**.
-4. **Proxy** (a Vercel Edge Function) builds one `evaluate()` call to `typesafe-ai/jev`: one
-   `score` question per chunk, rubric `not relevant / somewhat relevant / relevant / highly
-relevant`. It returns each chunk's score.
-5. **Background worker** ranks chunks by score, sends the top 8 to the popup and back to the
-   content script.
-6. **Content script** highlights and auto-scrolls to the #1 result. The popup lists all returned
-   results with a snippet each; clicking one scrolls the page to that passage.
+4. **Proxy** (a Vercel Edge Function) splits the chunks into batches that each fit a Jev call and
+   scores them **in parallel**, so the whole page is covered rather than a sample of it. Each batch
+   is one `evaluate()` call with one `score` question per chunk, rubric
+   `not relevant / somewhat relevant / relevant / highly relevant`. For phrase and question
+   searches, a second pass then picks the single sentence that answers the query.
+5. **Background worker** ranks by score, applies the shape-dependent floor, and labels each result
+   exact or semantic.
+6. **Content script** marks every result in the page — literal terms in amber, answer sentences in
+   purple — and auto-scrolls to the best one. The popup lists the results with a match-kind pill;
+   clicking one scrolls the page to that passage.
 
 The extension never talks to Jev or the AI Gateway directly — it only ever calls your proxy, so
 no credentials ship in the extension bundle.
@@ -101,9 +103,15 @@ extension (and the page you're testing on) after each rebuild.
 ## Scope / known limitations (v1)
 
 - Single active tab only — no cross-tab or cross-page search.
-- Results scoring below `MIN_RESULT_SCORE` (1.5 on Jev's 0–3 rubric) are dropped, so a page with
-  no answer shows "Nothing on this page matched closely enough" rather than 8 confidently-ranked
-  irrelevant passages. Tune the floor in `extension/src/config.ts`.
+- The relevance floor, result count and whether the sentence-level refine pass runs are all keyed
+  to the query's shape — one word, a phrase, or a question. See `extension/src/query-shape.ts`;
+  the reasoning is in `docs/ARCHITECTURE.md`.
+- A page with no answer shows "Nothing on this page matched closely enough" rather than a list of
+  confidently-ranked irrelevant passages.
+- Results are labelled **Exact** (the passage contains your words) or **Semantic** (Jev matched it
+  on meaning), and highlighted in amber or purple to match.
+- **Tables are not extracted yet.** On a reference-heavy page that is a real gap — roughly 45% of
+  the text is currently extracted, and a data table can be exactly what a query wants.
 - No caching or persistence between page loads; every search re-extracts and re-scores.
 - No auth — the proxy is open. **Rate limiting was intentionally left out of v1** (see
   `CLAUDE.md` for why); if you deploy this publicly, add one before relying on it.
