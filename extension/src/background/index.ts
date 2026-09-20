@@ -1,4 +1,6 @@
-import { MIN_RESULT_SCORE, PROXY_SEARCH_URL, TOP_N_RESULTS } from '../config';
+import { PROXY_SEARCH_URL } from '../config';
+import { extractTerms, hasExactMatch } from '../lexical';
+import { policyFor } from '../query-shape';
 import type {
   BackgroundRequest,
   BackgroundResponse,
@@ -36,17 +38,27 @@ async function extractChunks(tabId: number): Promise<Chunk[]> {
 
 interface ProxyScoreResponse {
   ok: boolean;
-  scores?: Array<{ id: string; score: number }>;
+  scores?: Array<{ id: string; score: number; span?: string }>;
+  coverage?: { scored: number; total: number };
   error?: string;
 }
 
 async function scoreChunks(query: string, chunks: Chunk[]): Promise<RankedResult[]> {
+  // The query's shape decides how strict to be and whether the sentence-level
+  // refine pass is worth paying for. See extension/src/query-shape.ts.
+  const policy = policyFor(query);
+
   let res: Response;
   try {
     res = await fetch(PROXY_SEARCH_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query, chunks: chunks.map(({ id, text }) => ({ id, text })) }),
+      body: JSON.stringify({
+        query,
+        chunks: chunks.map(({ id, text }) => ({ id, text })),
+        refine: policy.refine,
+        minScore: policy.minScore,
+      }),
     });
   } catch {
     throw new Error('Could not reach the search proxy. Check your connection and try again.');
@@ -58,18 +70,34 @@ async function scoreChunks(query: string, chunks: Chunk[]): Promise<RankedResult
     throw new Error(body?.error ?? `Search failed (HTTP ${res.status}).`);
   }
 
-  const scoreById = new Map(body.scores.map((s) => [s.id, s.score]));
+  // A batch can fail upstream and leave part of the page unsearched. Surfacing
+  // it beats silently reporting a confident answer drawn from 60% of the page.
+  if (body.coverage && body.coverage.scored < body.coverage.total) {
+    console.warn(
+      `PageLens: only ${body.coverage.scored} of ${body.coverage.total} passages were scored.`,
+    );
+  }
+
+  const scoredById = new Map(body.scores.map((s) => [s.id, s]));
+  const terms = extractTerms(query);
 
   return chunks
-    .map((chunk) => ({
-      id: chunk.id,
-      ref: chunk.ref,
-      text: chunk.text,
-      score: scoreById.get(chunk.id) ?? 0,
-    }))
-    .filter((result) => result.score >= MIN_RESULT_SCORE)
+    .map((chunk) => {
+      const scored = scoredById.get(chunk.id);
+      return {
+        id: chunk.id,
+        ref: chunk.ref,
+        text: chunk.text,
+        score: scored?.score ?? 0,
+        // Classified here, from text we already hold: no model call needed to
+        // know whether a passage literally contains what was typed.
+        matchKind: hasExactMatch(chunk.text, terms) ? ('exact' as const) : ('semantic' as const),
+        span: scored?.span,
+      };
+    })
+    .filter((result) => result.score >= policy.minScore)
     .sort((a, b) => b.score - a.score)
-    .slice(0, TOP_N_RESULTS);
+    .slice(0, policy.topN);
 }
 
 chrome.runtime.onMessage.addListener(
@@ -84,7 +112,11 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ type: 'RESULTS', results });
 
           if (results.length > 0) {
-            const highlight: ContentRequest = { type: 'HIGHLIGHT', results };
+            const highlight: ContentRequest = {
+              type: 'HIGHLIGHT',
+              results,
+              terms: extractTerms(message.query),
+            };
             await chrome.tabs.sendMessage(tabId, highlight);
           }
         } catch (error) {
