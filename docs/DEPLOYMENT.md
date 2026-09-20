@@ -69,11 +69,44 @@ is `<that URL>/api/search`.
 If you outgrow the default domain, add a custom domain under **Project Settings -> Domains** —
 just remember to update `PROXY_SEARCH_URL` and `host_permissions` (below) to match.
 
-### Rate limiting (deliberately out of scope for v1)
+### Rate limiting
 
-The proxy has no rate limiting or auth (see `CLAUDE.md` for why). If you're deploying this
-somewhere it'll get real traffic, add a limiter (e.g. Vercel KV or Upstash Redis with a
-sliding-window check) before relying on it being protected.
+The proxy meters every search against a sliding window in Upstash Redis, and **fails closed** — if
+it can't reach Redis, it refuses the request rather than letting model spend go unmetered. So the
+credentials below are required for any deployment.
+
+Budgets are counted in **Jev calls, not HTTP requests**, because one request can cost up to nine
+model calls (see `CLAUDE.md`):
+
+| Tier    | Key                                           | Budget                |
+| ------- | --------------------------------------------- | --------------------- |
+| IP      | `x-forwarded-for`, set by Vercel              | 60 Jev calls / minute |
+| Install | `x-pagelens-install`, minted by the extension | 30 Jev calls / minute |
+
+Both must pass. The install tier is checked first, so one browser that has exhausted its own
+budget can't drain the IP budget it shares with everyone else behind the same NAT.
+
+1. Create a Redis database — Vercel dashboard **Storage -> Upstash**, or directly at
+   `https://console.upstash.com`. The free tier (10k commands/day) is ample: a search costs two
+   commands.
+2. Copy its REST credentials into `proxy/.env.local` **and** the Vercel project's Environment
+   Variables:
+
+   ```
+   UPSTASH_REDIS_REST_URL=https://<your-db>.upstash.io
+   UPSTASH_REDIS_REST_TOKEN=<token>
+   ```
+
+3. To run locally without an Upstash database, set `RATE_LIMIT_DISABLED=1` in `proxy/.env.local`.
+   This is an explicit opt-out so that missing credentials can never quietly become "no limiting";
+   never set it in a deployed environment.
+
+Tuning the numbers: `IP_CALLS_PER_MINUTE` and `INSTALL_CALLS_PER_MINUTE` in
+`proxy/lib/rate-limit.ts`.
+
+A limited client gets a `429` with a `Retry-After` header and a `retryAfter` field in the JSON
+body; the extension turns that into a "try again in Ns" message in the popup rather than a generic
+failure.
 
 ## Extension
 

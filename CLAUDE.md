@@ -75,11 +75,21 @@ all point back to the same anchor (scrolling to any of them lands in the right p
 is now a pathological-page guard rather than a sampling cap — every chunk gets scored, because the
 proxy batches them.
 
-**Rate limiting was skipped for v1** (explicit user decision — the alternative, a real
-distributed limiter, needs Vercel KV/Upstash or similar, an external service the rest of the
-stack doesn't otherwise need; an in-memory Edge Function limiter is best-effort at best since
-it's not shared across regions or cold starts). If this proxy is ever deployed somewhere it'll get
-real traffic, add one before relying on it being "protected."
+**Rate limiting is metered in Jev calls, not HTTP requests** (`proxy/lib/rate-limit.ts`). One
+request is not one unit of cost: `batchChunks()` turns a long page into up to `MAX_BATCHES`
+concurrent Jev calls plus an optional refine pass, so a request-counting limiter charges a
+960-chunk caller the same as a 5-chunk one and undercharges the expensive path by ~9x. The check
+sits after batching (the cost isn't known before it) and before the fan-out (the first thing that
+spends money); everything in between is local and free.
+
+Upstash Redis backs it rather than an in-memory `Map`, because Edge isolates are per-region and
+recycled — an in-process counter silently resets and is never shared, which is protection in
+appearance only. `ephemeralCache` still gives that in-process short-circuit as a free first layer
+on top of the shared counter.
+
+It **fails closed**: an unreachable Redis means requests can't be metered, and unmetered requests
+here are unmetered spend. `RATE_LIMIT_DISABLED=1` is the explicit local-dev opt-out, so missing
+credentials never degrade into a silent no-op.
 
 **Every result is marked, auto-scrolling to the best one.** This started as top-1 only, by explicit
 user decision, and was reversed once results became precise enough not to be noisy: a passage
@@ -96,6 +106,32 @@ interfaces/constants. If these ever drift out of sync, that's the tradeoff — c
 The token budget deliberately is **not** duplicated. It lives only in `proxy/lib/jev.ts`, which
 owns the Jev contract; the extension just caps total characters as a message-size guard. Two copies
 of a number that was already measured wrong once is not a tradeoff worth taking.
+
+## A client-supplied identifier may only narrow a limit, never widen one
+
+The limiter keys on two tiers, and which tier a key can belong to follows entirely from whether the
+caller controls it:
+
+- **IP** (`x-forwarded-for`, set by Vercel from the connection) is the authoritative ceiling:
+  60 Jev calls/minute. A caller cannot forge it.
+- **Install id** (`x-pagelens-install`, a UUID the extension mints into `chrome.storage.local`) is
+  a _stricter_ inner tier at 30/minute, checked first so a browser that has blown its own budget
+  is rejected without also draining the IP budget it shares behind a NAT.
+
+Omitting the header buys nothing — it drops the extra restriction and leaves the IP ceiling. That
+asymmetry is the whole point: a caller-controlled value used as the _sole_ key is not a limit,
+because whoever controls it mints fresh buckets on demand.
+
+This is also why **the user-agent is deliberately not part of the key**, despite being the obvious
+second signal. Post-UA-reduction it carries almost no entropy (thousands of unrelated users share
+one string, so it would bucket them together), and being a caller-set header, including it would
+let one attacker multiply their own budget by varying it. It makes the limiter weaker, not
+stronger.
+
+`chrome.storage.local` over IndexedDB for the id: identical guarantees (both only bind an honest
+client), but extension storage isn't subject to Chrome's best-effort quota eviction, is reachable
+directly from the MV3 service worker, and needs no open/upgrade dance. It costs the `storage`
+permission, which is not a host permission and raises no install-time warning.
 
 ## Jev's usable limits are far below its documented context
 

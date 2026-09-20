@@ -53,7 +53,15 @@ cp .env.local.example .env.local
 
 Get a key from your Vercel team's **AI Gateway → API Keys** page (requires a Vercel account, and
 a card on file — AI Gateway returns a 403 `customer_verification_required` until you add one,
-even to spend the free credits). For local development:
+even to spend the free credits).
+
+The proxy is rate limited and **fails closed**, so it also needs an Upstash Redis database — create
+one from the Vercel dashboard's **Storage → Upstash** or at
+[console.upstash.com](https://console.upstash.com), then set `UPSTASH_REDIS_REST_URL` and
+`UPSTASH_REDIS_REST_TOKEN` in the same `.env.local`. The free tier is ample; a search costs two
+commands. To run locally without one, set `RATE_LIMIT_DISABLED=1` instead.
+
+For local development:
 
 ```bash
 pnpm dev:proxy   # http://localhost:3000/api/search
@@ -69,8 +77,10 @@ To deploy:
 pnpm --filter pagelens-proxy deploy   # runs `vercel deploy --prod`
 ```
 
-On first deploy, also set `AI_GATEWAY_API_KEY` in the Vercel project's **Settings → Environment
-Variables** (the `.env.local` file only covers local `vercel dev`).
+On first deploy, also set `AI_GATEWAY_API_KEY`, `UPSTASH_REDIS_REST_URL` and
+`UPSTASH_REDIS_REST_TOKEN` in the Vercel project's **Settings → Environment Variables** (the
+`.env.local` file only covers local development). Without the Upstash pair the limiter fails
+closed and every search returns a 503.
 
 Vercel will give you a production URL like `https://pagelens-proxy.vercel.app`. Note the full
 search endpoint: `https://pagelens-proxy.vercel.app/api/search`.
@@ -113,8 +123,9 @@ extension (and the page you're testing on) after each rebuild.
 - **Tables are not extracted yet.** On a reference-heavy page that is a real gap — roughly 45% of
   the text is currently extracted, and a data table can be exactly what a query wants.
 - No caching or persistence between page loads; every search re-extracts and re-scores.
-- No auth — the proxy is open. **Rate limiting was intentionally left out of v1** (see
-  `CLAUDE.md` for why); if you deploy this publicly, add one before relying on it.
+- No auth — the proxy is open, but it is **rate limited**: 60 Jev calls per minute per IP, and a
+  stricter 30 per browser install, metered in model calls rather than HTTP requests. Needs an
+  Upstash Redis database; see `docs/DEPLOYMENT.md`.
 - Pages with more extractable text than Jev's ~32k token budget allows return a clear error in
   the popup instead of a partial/broken search (see `estimateRequestTokens` in both
   `extension/src/config.ts` and `proxy/lib/jev.ts`).

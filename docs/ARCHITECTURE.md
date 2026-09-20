@@ -12,6 +12,7 @@ root `README.md` for setup and `CLAUDE.md` for the reasoning behind specific des
 | Background worker | MV3 service worker                           | `extension/src/background/index.ts` |
 | Content script    | Injected into the active tab, isolated world | `extension/src/content/`            |
 | Proxy             | Vercel Edge Function                         | `proxy/api/search.ts`               |
+| Rate limiter      | Upstash Redis, called from the Edge Function | `proxy/lib/rate-limit.ts`           |
 
 ```mermaid
 flowchart TD
@@ -22,12 +23,15 @@ flowchart TD
     end
     subgraph SRV["Server side — holds the API key"]
         X["Vercel Edge Function<br/>proxy/api/search.ts"]
+        L["Rate limiter<br/>Upstash sliding window"]
         J["typesafe-ai/jev<br/>via Vercel AI Gateway"]
     end
     P -->|"SEARCH"| B
     B -->|"EXTRACT"| C
     C -->|"every chunk"| B
-    B -->|"POST query + chunks"| X
+    B -->|"POST query + chunks<br/>+ x-pagelens-install"| X
+    X -->|"cost in jev calls"| L
+    L -->|"429 over budget"| X
     X -->|"parallel batches,<br/>plus optional refine"| J
     J -->|"score 0 to 3 per chunk"| X
     X -->|"scores, spans, coverage"| B
@@ -57,6 +61,10 @@ sequenceDiagram
     C->>C: walk DOM, split into chunks
     C-->>B: CHUNKS or ERROR
     B->>X: POST query, chunks, refine, minScore
+    X->>X: batch, then meter cost in jev calls
+    alt over budget
+        X-->>B: 429 with Retry-After
+    end
     par one call per batch
         X->>J: pass 1, score questions
         J-->>X: interpolated scores
@@ -147,6 +155,14 @@ interface RankedResult extends Chunk {
 
 `POST /api/search` (types in `proxy/lib/types.ts`):
 
+Request headers:
+
+| Header                           | Set by            | Purpose                                        |
+| -------------------------------- | ----------------- | ---------------------------------------------- |
+| `content-type: application/json` | background worker | —                                              |
+| `x-pagelens-install`             | background worker | per-install UUID, the stricter rate-limit tier |
+| `x-forwarded-for`                | Vercel            | the authoritative rate-limit key               |
+
 ```ts
 // request
 {
@@ -165,8 +181,13 @@ interface RankedResult extends Chunk {
 {
   ok: false;
   error: string;
+  retryAfter?: number; // seconds; set on 429 and 503
 }
 ```
+
+Status codes: `400` malformed or empty, `405` non-POST, **`429` rate limited**, `500`
+misconfigured, `502` every batch failed, **`503` the rate limiter is unreachable**. A `429` and a
+`503` both carry a `Retry-After` header alongside the `retryAfter` body field.
 
 Each batch is one `evaluate()` call: a shared `state` (`{ query, chunks }`) and one `score`
 question per chunk, rubric `not relevant / somewhat relevant / relevant / highly relevant`. See
@@ -176,6 +197,48 @@ question per chunk, rubric `not relevant / somewhat relevant / relevant / highly
 Each question names its own chunk id — `How relevant is the passage with id "c7"...`. That is
 load-bearing, not decoration: all the questions share one state containing every chunk, so without
 the id nothing distinguishes them and Jev returns near-identical scores across the board.
+
+## Rate limiting
+
+The proxy is public and unauthenticated, and every search spends AI Gateway money, so requests are
+metered before any model call. `proxy/lib/rate-limit.ts` holds the limiter; `CLAUDE.md` holds the
+reasoning behind the keying.
+
+**The unit is a Jev call, not an HTTP request.** `batchChunks()` turns a long page into up to
+`MAX_BATCHES` concurrent calls plus an optional refine pass, so a single request can cost nine
+model calls while another costs one:
+
+| Chunks sent | Batches | Refine | Cost charged |
+| ----------- | ------- | ------ | ------------ |
+| 5           | 1       | no     | 1            |
+| 240         | 3       | yes    | 4            |
+| 960         | 8       | yes    | 9            |
+
+A request-counting limiter would charge all three the same and undercharge the expensive path by
+~9x.
+
+**Two tiers, both of which must pass:**
+
+| Tier    | Key                  | Budget            | Caller can forge it? |
+| ------- | -------------------- | ----------------- | -------------------- |
+| Install | `x-pagelens-install` | 30 calls / minute | yes                  |
+| IP      | `x-forwarded-for`    | 60 calls / minute | no                   |
+
+The install tier is checked first, so a browser that has exhausted its own budget is rejected
+without also draining the IP budget it shares with everyone behind the same NAT. Omitting the
+header drops only the extra restriction — it never widens the IP ceiling.
+
+Where the check sits is load-bearing:
+
+```
+validate -> batchChunks() -> RATE LIMIT -> Jev fan-out -> refine -> respond
+                             ^^^^^^^^^^
+            after batching, because cost isn't known before it;
+            before the fan-out, because that is the first thing that spends money
+```
+
+It **fails closed**: an unreachable Redis returns `503` rather than letting an unmetered request
+through to the model. `RATE_LIMIT_DISABLED=1` is the explicit local-dev opt-out.
 
 ## Covering the whole page
 
