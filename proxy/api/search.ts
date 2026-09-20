@@ -1,14 +1,14 @@
 import { experimental_evaluate as evaluate } from 'ai';
-import type { Chunk, ScoredChunk, SearchRequestBody, SearchResponseBody } from '../lib/types.ts';
+import type { Chunk, ScoredChunk, SearchRequestBody, SearchResponseBody } from '../lib/types.js';
 import {
   MAX_BATCHES,
   MAX_CHUNKS,
   REFINE_TOP_N,
   RELEVANCE_RUBRIC,
   batchChunks,
-} from '../lib/jev.ts';
-import { splitSentences } from '../lib/sentences.ts';
-import { checkLimit, identify } from '../lib/rate-limit.ts';
+} from '../lib/jev.js';
+import { splitSentences } from '../lib/sentences.js';
+import { checkLimit, identify } from '../lib/rate-limit.js';
 
 export const config = { runtime: 'edge' };
 

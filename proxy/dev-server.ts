@@ -13,7 +13,36 @@
 // stops Node's global types leaking into the Edge-targeted code.
 
 import { createServer } from 'node:http';
-import handler from './api/search.ts';
+import { registerHooks } from 'node:module';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// api/ and lib/ import each other with `.js` extensions that point at `.ts`
+// files -- the TypeScript ESM convention, and the only form Vercel's function
+// builder can follow. It compiles each file to JavaScript separately without
+// rewriting specifiers, so a literal `../lib/jev.ts` import survives into the
+// emitted `search.js` and dangles there:
+//
+//     The Edge Function "api/search" is referencing unsupported modules:
+//       ../lib/jev.ts, ../lib/sentences.ts, ../lib/rate-limit.ts
+//
+// Node's resolver is the opposite: it wants the real file on disk and will not
+// remap `.js` to `.ts` itself. So this maps them back before the handler graph
+// loads, which keeps `pnpm dev:proxy` a plain `node` invocation with no build
+// step and no dependencies -- the whole point of this file.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith('.') && specifier.endsWith('.js') && context.parentURL) {
+      const asTs = new URL(specifier, context.parentURL).href.replace(/\.js$/, '.ts');
+      if (existsSync(fileURLToPath(asTs))) return { url: asTs, shortCircuit: true };
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
+// Imported dynamically, because the hook above has to be registered before
+// anything in the handler's module graph is resolved.
+const { default: handler } = await import('./api/search.ts');
 
 const PORT = Number(process.env.PORT ?? 3000);
 const ROUTE = '/api/search';

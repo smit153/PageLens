@@ -108,6 +108,18 @@ A limited client gets a `429` with a `Retry-After` header and a `retryAfter` fie
 body; the extension turns that into a "try again in Ns" message in the popup rather than a generic
 failure.
 
+### Build error: "referencing unsupported modules"
+
+```
+The Edge Function "api/search" is referencing unsupported modules:
+  ../lib/jev.ts, ../lib/sentences.ts, ../lib/rate-limit.ts
+```
+
+Something in `api/` or `lib/` is importing with a literal `.ts` extension. Vercel compiles each
+file to JavaScript without rewriting import specifiers, so a `.ts` specifier dangles next to the
+emitted `.js` file. Use `.js` extensions pointing at the `.ts` source instead — see `CLAUDE.md`.
+This does not show up in `pnpm typecheck` or `pnpm dev:proxy`; only a deploy catches it.
+
 ## Extension
 
 ### Point it at your proxy

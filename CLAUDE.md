@@ -186,9 +186,26 @@ Consequences to keep in mind when editing `proxy/`:
 - **No `build` script in `proxy/package.json`.** Adding one makes Vercel treat the project as a
   static site and fail on a missing `public/` directory. The root `build` script uses
   `pnpm -r --if-present run build` so the proxy is simply skipped.
-- **`api/` and `lib/` imports use explicit `.ts` extensions** (with `allowImportingTsExtensions`
-  in `proxy/tsconfig.json`), because Node's ESM resolver requires them. Verified to still bundle
-  cleanly under esbuild, which is what Vercel's function builder uses.
+- **`api/` and `lib/` imports use `.js` extensions that point at `.ts` files**, the TypeScript ESM
+  convention. They used to use literal `.ts` extensions (with `allowImportingTsExtensions`) on the
+  assumption that esbuild would resolve them; a real deploy proved otherwise:
+
+  ```
+  The Edge Function "api/search" is referencing unsupported modules:
+    ../lib/jev.ts, ../lib/sentences.ts, ../lib/rate-limit.ts
+  ```
+
+  Vercel's builder compiles each file to JavaScript separately **without rewriting specifiers**, so
+  `../lib/jev.ts` survives into the emitted `search.js` next to an emitted `jev.js` and dangles.
+  `.js` specifiers satisfy both halves: esbuild maps them back to the `.ts` source when bundling
+  from source, and they match the emitted filenames when compiling first. Both paths were checked
+  locally before redeploying.
+
+  Node is the opposite case — it wants the literal file on disk and will not remap `.js` to `.ts` —
+  so `dev-server.ts` registers a `node:module` resolve hook that maps them back. That keeps
+  `pnpm dev:proxy` a plain `node` invocation with no build step. Do not "simplify" the imports back
+  to `.ts`; it breaks the deploy, and the failure is at deploy time, not in `pnpm typecheck`.
+
 - **`dev-server.ts` sits outside `tsconfig.json`'s `include`** (which covers only `api` and
   `lib`), so it isn't type-checked and Node's globals don't leak into the Edge-targeted code.
 

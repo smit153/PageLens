@@ -10,7 +10,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": ["api", "lib"]
