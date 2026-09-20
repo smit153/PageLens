@@ -18,5 +18,5 @@
     }
   },
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://pagelens-ten.vercel.app/*"]
+  "host_permissions": ["http://localhost:3000/*"]
 }
